@@ -17,6 +17,7 @@ const state = {
 
 const views = { earth: null, space: null };
 const ui = {};
+let trajectory = { earth: [], space: [] };
 
 init();
 
@@ -273,8 +274,6 @@ function eastNorthVectors(phi, lambda) {
   const north = new THREE.Vector3(-Math.sin(phi) * Math.cos(lambda), Math.cos(phi), -Math.sin(phi) * Math.sin(lambda));
   return { east, north };
 }
-
-let trajectory = { earth: [], space: [] };
 
 function resetTrajectory() {
   state.elapsed = 0;
