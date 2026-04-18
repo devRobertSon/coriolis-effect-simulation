@@ -1,50 +1,68 @@
 // Coriolis effect — 2D canvas, pseudo-3D orthographic projection.
-// Earth view: rotating frame (Coriolis visible).
-// Space view: inertial frame (straight-line path).
+// Ball moves along the sphere surface (lat/lon lines), not through free space.
+// 4 views: rotating-earth × {earth-frame, inertial-frame}
+//          fixed-earth   × {earth-frame, inertial-frame}
 
-const EARTH_R = 1.0;
-const OMEGA_BASE = 0.55; // exaggerated for visibility
+const EARTH_R  = 1.0;
+const OMEGA_B  = 0.55; // exaggerated rotation speed
+const ANIM_DUR = 6.0;
 
 const state = {
   hemisphere: 'N',
   scenario: 'eq-to-pole',
   speedMul: 1.0,
-  rotationMul: 1.0,
+  rotMul:   1.0,
   timeScale: 1.0,
   running: false,
   elapsed: 0,
-  duration: 6.0,
-  physDuration: 1.4, // physics seconds the arc takes
+  physDur: 3.0,
 };
 
 const COLORS = {
-  bg0: '#07102a', bg1: '#030810',
-  ocean: '#1255a8', oceanEdge: '#092555',
-  grid: 'rgba(140,190,255,0.2)', equator: '#ffd166',
-  axis: 'rgba(255,123,208,0.5)',
-  trailEarth: '#ffd166', trailSpace: '#6ea8ff',
-  ball: '#ffffff', start: '#7bd88f', end: '#ff6b9a',
+  bg0:'#07102a', bg1:'#030810',
+  ocean:'#1255a8', oceanEdge:'#092555',
+  grid:'rgba(140,190,255,0.2)', equator:'#ffd166',
+  axis:'rgba(255,123,208,0.5)',
+  trailE:'#ffd166', trailS:'#6ea8ff',
+  ball:'#ffffff', start:'#7bd88f', end:'#ff6b9a',
 };
 
-let views = {}, ui = {}, traj = { earth: [], space: [] }, stars = null;
+let views = {}, ui = {},
+    traj  = { earth: [], space: [] },
+    stars = null;
 
 window.addEventListener('DOMContentLoaded', () => {
-  views.earth = makeView(document.getElementById('earthView'));
-  views.space = makeView(document.getElementById('spaceView'));
-  views.earth.trajFollowsGlobe = true;  // rotating frame: trajectory painted on globe
-  views.space.trajFollowsGlobe = false; // inertial frame: trajectory fixed, globe rotates past
+  // Rotating-earth views
+  views.earth      = mkView('earthView');
+  views.space      = mkView('spaceView');
+  // Fixed-earth views
+  views.earthFixed = mkView('earthFixed');
+  views.spaceFixed = mkView('spaceFixed');
+
+  // In rotating views the globe spins; earth-frame trajectory rotates with it.
+  views.earth.trajWithGlobe = true;
+  views.space.trajWithGlobe = false;
+  // In fixed views the globe stays put; trajectory drawn as-is.
+  views.earthFixed.trajWithGlobe = false;
+  views.spaceFixed.trajWithGlobe = false;
+
   bindUI();
-  buildTrajectory();
+  buildTraj();
   window.addEventListener('resize', onResize);
   onResize();
   requestAnimationFrame(loop);
 });
 
-function makeView(canvas) {
-  return { canvas, ctx: canvas.getContext('2d'), w: 0, h: 0, scale: 1, cx: 0, cy: 0, earthAngle: 0 };
+function mkView(id) {
+  return {
+    canvas: document.getElementById(id),
+    ctx: document.getElementById(id).getContext('2d'),
+    w:0, h:0, cx:0, cy:0, scale:1, earthAngle:0,
+    trajWithGlobe: false,
+  };
 }
 
-// ---------- UI --------------------------------------------------------------
+// ─── UI ──────────────────────────────────────────────────────────────────────
 
 function bindUI() {
   ui.play  = document.getElementById('playBtn');
@@ -52,345 +70,304 @@ function bindUI() {
   ui.stop  = document.getElementById('stopBtn');
   ui.exp   = document.getElementById('explanation');
 
-  ui.play.addEventListener('click', () => { if (state.elapsed >= state.duration) buildTrajectory(); state.running = true; });
+  ui.play.addEventListener('click',  () => { if (state.elapsed >= ANIM_DUR) buildTraj(); state.running = true; });
   ui.pause.addEventListener('click', () => { state.running = false; });
-  ui.stop.addEventListener('click', () => { state.running = false; buildTrajectory(); });
+  ui.stop.addEventListener('click',  () => { state.running = false; buildTraj(); });
 
-  document.querySelectorAll('.btn.toggle[data-hemi]').forEach(b => b.addEventListener('click', () => {
-    document.querySelectorAll('.btn.toggle[data-hemi]').forEach(x => x.setAttribute('aria-pressed', 'false'));
-    b.setAttribute('aria-pressed', 'true');
-    state.hemisphere = b.dataset.hemi;
-    buildTrajectory(); updateExp();
-  }));
+  document.querySelectorAll('.btn.toggle[data-hemi]').forEach(b =>
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.btn.toggle[data-hemi]').forEach(x => x.setAttribute('aria-pressed','false'));
+      b.setAttribute('aria-pressed','true');
+      state.hemisphere = b.dataset.hemi;
+      buildTraj(); updateExp();
+    })
+  );
+  document.querySelectorAll('.btn.scenario').forEach(b =>
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.btn.scenario').forEach(x => x.setAttribute('aria-pressed','false'));
+      b.setAttribute('aria-pressed','true');
+      state.scenario = b.dataset.scenario;
+      buildTraj(); updateExp();
+    })
+  );
 
-  document.querySelectorAll('.btn.scenario').forEach(b => b.addEventListener('click', () => {
-    document.querySelectorAll('.btn.scenario').forEach(x => x.setAttribute('aria-pressed', 'false'));
-    b.setAttribute('aria-pressed', 'true');
-    state.scenario = b.dataset.scenario;
-    buildTrajectory(); updateExp();
-  }));
-
-  bindSlider('speedSlider',    'speedValue',    v => { state.speedMul    = v; buildTrajectory(); });
-  bindSlider('rotationSlider', 'rotationValue', v => { state.rotationMul = v; buildTrajectory(); });
-  bindSlider('timeScaleSlider','timeScaleValue',v => { state.timeScale   = v; });
-
+  bindSlider('speedSlider',    'speedValue',    v => { state.speedMul = v; buildTraj(); });
+  bindSlider('rotationSlider', 'rotationValue', v => { state.rotMul   = v; buildTraj(); });
+  bindSlider('timeScaleSlider','timeScaleValue',v => { state.timeScale = v; });
   updateExp();
 }
 
 function bindSlider(id, outId, fn) {
   const el = document.getElementById(id), out = document.getElementById(outId);
-  const apply = () => { const v = parseFloat(el.value); out.textContent = v.toFixed(2); fn(v); };
-  el.addEventListener('input', apply); apply();
+  const run = () => { const v = parseFloat(el.value); out.textContent = v.toFixed(2); fn(v); };
+  el.addEventListener('input', run); run();
 }
 
-// ---------- Math helpers ----------------------------------------------------
+// ─── Math helpers ─────────────────────────────────────────────────────────────
 
-function v3(x, y, z) { return { x, y, z }; }
+function v3(x,y,z) { return {x,y,z}; }
 
 function latLon(phi, lam, r = EARTH_R) {
-  return v3(r * Math.cos(phi) * Math.cos(lam),
-            r * Math.sin(phi),
-            r * Math.cos(phi) * Math.sin(lam));
+  return v3(r*Math.cos(phi)*Math.cos(lam), r*Math.sin(phi), r*Math.cos(phi)*Math.sin(lam));
 }
-
-function add3(a, b)     { return v3(a.x+b.x, a.y+b.y, a.z+b.z); }
-function scale3(a, k)   { return v3(a.x*k, a.y*k, a.z*k); }
-function len3(a)        { return Math.hypot(a.x, a.y, a.z); }
-function norm3(a)       { const l = len3(a)||1; return scale3(a, 1/l); }
-function dot3(a, b)     { return a.x*b.x + a.y*b.y + a.z*b.z; }
 
 function rotY(v, a) {
-  const c = Math.cos(a), s = Math.sin(a);
-  return v3(c*v.x + s*v.z, v.y, -s*v.x + c*v.z);
+  const c=Math.cos(a),s=Math.sin(a);
+  return v3(c*v.x+s*v.z, v.y, -s*v.x+c*v.z);
 }
 function rotX(v, a) {
-  const c = Math.cos(a), s = Math.sin(a);
-  return v3(v.x, c*v.y - s*v.z, s*v.y + c*v.z);
+  const c=Math.cos(a),s=Math.sin(a);
+  return v3(v.x, c*v.y-s*v.z, s*v.y+c*v.z);
 }
 
-function onSphere(v) {
-  const l = len3(v); if (l === 0) return v3(1,0,0);
-  return scale3(v, EARTH_R / l);
-}
-
-// tilt: positive tilts north pole toward viewer (+z). Sign depends on hemisphere.
+// Camera tilt so the selected hemisphere faces the viewer.
 function tilt() { return state.hemisphere === 'N' ? Math.PI/5 : -Math.PI/5; }
 
-// Camera transform for globe surface (applies earth rotation + tilt)
-function globeXform(v, view) { return rotX(rotY(v, view.earthAngle), tilt()); }
-// Camera transform for trajectory (only tilt — trajectory is already in its frame)
-// Earth view: trajectory is in rotating frame → rotate display with globe (same earthAngle).
-// Space view: trajectory is in inertial frame → only camera tilt, no Y rotation.
-function trajXform(v, view) {
-  if (view && view.trajFollowsGlobe) return globeXform(v, view);
-  return rotX(v, tilt());
+// Globe surface transform (earth rotation + tilt).
+function globeXform(pt, view) { return rotX(rotY(pt, view.earthAngle), tilt()); }
+
+// Trajectory transform: earth-frame view rotates the trajectory with the globe;
+// inertial-frame view only applies the camera tilt.
+function trajXform(pt, view) {
+  return view.trajWithGlobe ? globeXform(pt, view) : rotX(pt, tilt());
 }
 
 function toScreen(p, view) {
-  return { sx: view.cx + p.x * view.scale, sy: view.cy - p.y * view.scale, z: p.z };
+  return { sx: view.cx + p.x*view.scale, sy: view.cy - p.y*view.scale, z: p.z };
 }
 
-// ---------- Physics ---------------------------------------------------------
+// ─── Physics: ball moves along lat/lon surface lines ─────────────────────────
 
-function scenarios() {
-  const hs = state.hemisphere === 'N' ? 1 : -1;
-  const phi30 = hs * Math.PI / 6;
-  // lam0 = π/2 places the start point at the front-center of the tilted globe view.
-  const L = Math.PI / 2;
+function scenarioParams() {
+  const hs  = state.hemisphere === 'N' ? 1 : -1;
+  const LAM = Math.PI / 2;          // starting longitude (front-centre of tilted view)
+  const rate = 0.18 * state.speedMul; // rad / physics-second
+
   switch (state.scenario) {
-    case 'eq-to-pole':  return { phi0: 0,                    lam0: L, dE: 0,  dN: hs };
-    case 'pole-to-eq':  return { phi0: hs*(Math.PI/2-0.18),  lam0: L, dE: 0,  dN: -hs };
-    case 'eastward':    return { phi0: phi30,                 lam0: L, dE: 1,  dN: 0 };
-    case 'westward':    return { phi0: phi30,                 lam0: L, dE: -1, dN: 0 };
+    case 'eq-to-pole':
+      return { phi0: 0,                      lam0: LAM,
+               dPhi: hs * rate,              dLam: 0 };
+    case 'pole-to-eq':
+      return { phi0: hs * (Math.PI/2 - 0.15), lam0: LAM,
+               dPhi: -hs * rate,             dLam: 0 };
+    case 'eastward':
+      return { phi0: hs * Math.PI/6,         lam0: LAM,
+               dPhi: 0,                      dLam: rate };
+    case 'westward':
+      return { phi0: hs * Math.PI/6,         lam0: LAM,
+               dPhi: 0,                      dLam: -rate };
   }
 }
 
-function buildTrajectory() {
+function buildTraj() {
   state.elapsed = 0;
   traj.earth = []; traj.space = [];
 
-  const { phi0, lam0, dE, dN } = scenarios();
-  const speed  = 0.55 * state.speedMul;
-  const omega  = OMEGA_BASE * state.rotationMul;
-  const hs     = state.hemisphere === 'N' ? 1 : -1;
+  const { phi0, lam0, dPhi, dLam } = scenarioParams();
+  const omega = OMEGA_B * state.rotMul;
+  state.physDur = (45 * Math.PI / 180) / (Math.abs(dPhi) || Math.abs(dLam) || 0.01);
 
-  const pos0 = latLon(phi0, lam0);
+  const STEPS = 300;
+  for (let i = 0; i <= STEPS; i++) {
+    const t   = (i / STEPS) * state.physDur;
+    const phi = phi0 + dPhi * t;
+    const lam = lam0 + dLam * t;          // longitude in earth frame
 
-  // Local east/north unit vectors at launch point
-  const eastV  = norm3(v3(-Math.sin(lam0), 0, Math.cos(lam0)));
-  const northV = norm3(v3(-Math.sin(phi0)*Math.cos(lam0), Math.cos(phi0), -Math.sin(phi0)*Math.sin(lam0)));
-
-  const launchDir = norm3(add3(scale3(eastV, dE), scale3(northV, dN)));
-
-  // Inertial velocity = launch direction + surface co-rotation
-  // ω × r, with ω = (0, omega, 0): (omega*z, 0, -omega*x)
-  const surfVel = v3(omega * pos0.z, 0, -omega * pos0.x);
-  const vel = add3(scale3(launchDir, speed), surfVel);
-
-  // Cap physics duration so arc ≈ 50° max, stays in hemisphere
-  const arcRad = (50 * Math.PI / 180);
-  state.physDuration = arcRad / speed;
-  state.duration = 6.0;
-
-  const steps = 300;
-  for (let i = 0; i <= steps; i++) {
-    const t = (i / steps) * state.physDuration;
-
-    // Inertial position (straight line)
-    const inert = add3(pos0, scale3(vel, t));
-
-    // Space view: project inertial position to sphere
-    const spPt = onSphere(inert);
-    // Stop if trajectory drifts to wrong hemisphere
-    if (spPt.y * hs < -0.08) break;
-    traj.space.push(spPt);
-
-    // Earth view: de-rotate inertial position by omega*t → rotating frame
-    const earthPt = onSphere(rotY(inert, -omega * t));
-    traj.earth.push(earthPt);
+    traj.earth.push(latLon(phi, lam));
+    traj.space.push(latLon(phi, lam + omega * t)); // add earth's rotation → inertial lon
   }
 
-  views.earth.earthAngle = 0;
-  views.space.earthAngle = 0;
+  for (const v of allViews()) v.earthAngle = 0;
 }
 
-// ---------- Rendering -------------------------------------------------------
+function allViews() { return [views.earth, views.space, views.earthFixed, views.spaceFixed]; }
+
+// ─── Rendering ────────────────────────────────────────────────────────────────
 
 function onResize() {
-  for (const v of [views.earth, views.space]) {
-    const r = v.canvas.getBoundingClientRect();
+  for (const v of allViews()) {
+    const r   = v.canvas.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    v.canvas.width  = Math.max(2, Math.round(r.width  * dpr));
-    v.canvas.height = Math.max(2, Math.round(r.height * dpr));
+    v.canvas.width  = Math.round(r.width  * dpr);
+    v.canvas.height = Math.round(r.height * dpr);
     v.w = r.width; v.h = r.height;
     v.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    v.cx = r.width / 2; v.cy = r.height / 2;
+    v.cx = r.width/2; v.cy = r.height/2;
     v.scale = Math.min(r.width, r.height) * 0.36;
   }
-  if (!stars) stars = Array.from({length:250}, () => ({
-    x: Math.random(), y: Math.random(),
-    r: Math.random()*1.3+0.2, a: Math.random()*0.7+0.2,
+  stars = stars || Array.from({length:200}, () => ({
+    x:Math.random(), y:Math.random(),
+    r:Math.random()*1.2+0.2, a:Math.random()*0.6+0.2,
   }));
 }
 
 function drawBg(view) {
-  const { ctx, w, h, cx, cy, scale } = view;
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, COLORS.bg0); g.addColorStop(1, COLORS.bg1);
-  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  const {ctx,w,h} = view;
+  const g = ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,COLORS.bg0); g.addColorStop(1,COLORS.bg1);
+  ctx.fillStyle=g; ctx.fillRect(0,0,w,h);
   ctx.save();
   for (const s of stars) {
-    ctx.globalAlpha = s.a;
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(s.x*w, s.y*h, s.r, 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha=s.a; ctx.fillStyle='#fff';
+    ctx.beginPath(); ctx.arc(s.x*w,s.y*h,s.r,0,Math.PI*2); ctx.fill();
   }
   ctx.restore();
 }
 
 function drawGlobe(view) {
-  const { ctx, cx, cy, scale } = view;
-  // shaded disk
-  const g = ctx.createRadialGradient(cx-scale*0.3, cy-scale*0.3, scale*0.1, cx, cy, scale);
-  g.addColorStop(0, '#3472d4'); g.addColorStop(0.6, COLORS.ocean); g.addColorStop(1, COLORS.oceanEdge);
-  ctx.beginPath(); ctx.arc(cx, cy, scale, 0, Math.PI*2);
-  ctx.fillStyle = g; ctx.fill();
-  ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(120,170,255,0.3)'; ctx.stroke();
+  const {ctx,cx,cy,scale} = view;
+  const g = ctx.createRadialGradient(cx-scale*.3,cy-scale*.3,scale*.1,cx,cy,scale);
+  g.addColorStop(0,'#3472d4'); g.addColorStop(.6,COLORS.ocean); g.addColorStop(1,COLORS.oceanEdge);
+  ctx.beginPath(); ctx.arc(cx,cy,scale,0,Math.PI*2);
+  ctx.fillStyle=g; ctx.fill();
+  ctx.lineWidth=1.5; ctx.strokeStyle='rgba(120,170,255,0.3)'; ctx.stroke();
 
-  // graticule — lat circles every 30°, meridians every 30°
-  ctx.strokeStyle = COLORS.grid; ctx.lineWidth = 0.8;
-  for (let lat = -60; lat <= 60; lat += 30) drawLatCircle(view, lat * Math.PI/180);
-  for (let lon = 0; lon < 360; lon += 30) drawMeridian(view, lon * Math.PI/180);
+  ctx.strokeStyle=COLORS.grid; ctx.lineWidth=0.8;
+  for (const latD of [-60,-30,0,30,60]) drawLatCircle(view, latD*Math.PI/180);
+  for (let lonD=0; lonD<360; lonD+=30) drawMeridian(view, lonD*Math.PI/180);
 
-  // equator highlight
-  ctx.strokeStyle = COLORS.equator; ctx.globalAlpha = 0.7; ctx.lineWidth = 1.4;
-  drawLatCircle(view, 0); ctx.globalAlpha = 1;
+  // Equator highlight
+  ctx.strokeStyle=COLORS.equator; ctx.lineWidth=1.4; ctx.globalAlpha=0.7;
+  drawLatCircle(view, 0); ctx.globalAlpha=1;
 
-  // axis
-  const tp = toScreen(globeXform(v3(0,1.22,0), view), view);
-  const bp = toScreen(globeXform(v3(0,-1.22,0), view), view);
-  ctx.strokeStyle = COLORS.axis; ctx.lineWidth = 1; ctx.globalAlpha = 0.6;
+  // Axis
+  const tp=toScreen(globeXform(v3(0,1.22,0),view),view);
+  const bp=toScreen(globeXform(v3(0,-1.22,0),view),view);
+  ctx.strokeStyle=COLORS.axis; ctx.lineWidth=1; ctx.globalAlpha=0.55;
   ctx.beginPath(); ctx.moveTo(tp.sx,tp.sy); ctx.lineTo(bp.sx,bp.sy); ctx.stroke();
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha=1;
 }
 
 function drawLatCircle(view, phi) {
-  const { ctx } = view;
-  const segs = 90;
-  ctx.beginPath(); let pen = false;
-  for (let i = 0; i <= segs; i++) {
-    const lam = (i/segs) * Math.PI * 2;
-    const t = globeXform(latLon(phi, lam, EARTH_R*1.001), view);
-    if (t.z < 0) { pen = false; continue; }
-    const p = toScreen(t, view);
-    if (!pen) { ctx.moveTo(p.sx, p.sy); pen = true; } else ctx.lineTo(p.sx, p.sy);
+  const {ctx} = view;
+  ctx.beginPath(); let pen=false;
+  for (let i=0; i<=90; i++) {
+    const lam = (i/90)*Math.PI*2;
+    const t = globeXform(latLon(phi,lam,EARTH_R*1.001),view);
+    if (t.z<0) { pen=false; continue; }
+    const p=toScreen(t,view);
+    if (!pen) { ctx.moveTo(p.sx,p.sy); pen=true; } else ctx.lineTo(p.sx,p.sy);
   }
   ctx.stroke();
 }
 
 function drawMeridian(view, lam) {
-  const { ctx } = view;
-  const segs = 60;
-  ctx.beginPath(); let pen = false;
-  for (let i = 0; i <= segs; i++) {
-    const phi = -Math.PI/2 + (i/segs)*Math.PI;
-    const t = globeXform(latLon(phi, lam, EARTH_R*1.001), view);
-    if (t.z < 0) { pen = false; continue; }
-    const p = toScreen(t, view);
-    if (!pen) { ctx.moveTo(p.sx, p.sy); pen = true; } else ctx.lineTo(p.sx, p.sy);
+  const {ctx} = view;
+  ctx.beginPath(); let pen=false;
+  for (let i=0; i<=60; i++) {
+    const phi=-Math.PI/2+(i/60)*Math.PI;
+    const t=globeXform(latLon(phi,lam,EARTH_R*1.001),view);
+    if (t.z<0) { pen=false; continue; }
+    const p=toScreen(t,view);
+    if (!pen) { ctx.moveTo(p.sx,p.sy); pen=true; } else ctx.lineTo(p.sx,p.sy);
   }
   ctx.stroke();
 }
 
 function drawTrail(view, pts, color, alpha) {
-  const { ctx } = view;
-  if (pts.length < 2) return;
-  ctx.save(); ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-  // back pass (faded)
-  ctx.beginPath(); let pen = false;
+  if (pts.length<2) return;
+  const {ctx}=view;
+  ctx.save(); ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.lineJoin='round';
+  // Back pass (faded)
+  ctx.beginPath(); let pen=false;
   for (const pt of pts) {
-    const t = trajXform(pt, view); if (t.z >= 0) { pen = false; continue; }
-    const p = toScreen(t, view);
-    if (!pen) { ctx.moveTo(p.sx,p.sy); pen=true; } else ctx.lineTo(p.sx,p.sy);
+    const t=trajXform(pt,view); if (t.z>=0){pen=false;continue;}
+    const p=toScreen(t,view);
+    if(!pen){ctx.moveTo(p.sx,p.sy);pen=true;}else ctx.lineTo(p.sx,p.sy);
   }
-  ctx.globalAlpha = alpha * 0.22; ctx.strokeStyle = color; ctx.stroke();
-  // front pass
-  ctx.beginPath(); pen = false;
+  ctx.globalAlpha=alpha*0.22; ctx.strokeStyle=color; ctx.stroke();
+  // Front pass
+  ctx.beginPath(); pen=false;
   for (const pt of pts) {
-    const t = trajXform(pt, view); if (t.z < 0) { pen = false; continue; }
-    const p = toScreen(t, view);
-    if (!pen) { ctx.moveTo(p.sx,p.sy); pen=true; } else ctx.lineTo(p.sx,p.sy);
+    const t=trajXform(pt,view); if(t.z<0){pen=false;continue;}
+    const p=toScreen(t,view);
+    if(!pen){ctx.moveTo(p.sx,p.sy);pen=true;}else ctx.lineTo(p.sx,p.sy);
   }
-  ctx.globalAlpha = alpha; ctx.strokeStyle = color; ctx.stroke();
+  ctx.globalAlpha=alpha; ctx.strokeStyle=color; ctx.stroke();
   ctx.restore();
 }
 
-function drawDot(view, pt3, color, r, label) {
-  const t = trajXform(pt3, view);
-  const p = toScreen(t, view);
-  const { ctx } = view;
+function drawDot(view, pt, color, r, label) {
+  const t=trajXform(pt,view), p=toScreen(t,view), {ctx}=view;
   ctx.save();
-  ctx.globalAlpha = t.z < 0 ? 0.25 : 1;
-  ctx.fillStyle = color;
-  ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI*2); ctx.fill();
-  if (label && t.z >= 0) {
-    ctx.fillStyle = '#e8ecff';
-    ctx.font = '11px system-ui, sans-serif';
+  ctx.globalAlpha = t.z<0 ? 0.25 : 1;
+  ctx.fillStyle=color; ctx.beginPath(); ctx.arc(p.sx,p.sy,r,0,Math.PI*2); ctx.fill();
+  if (label && t.z>=0) {
+    ctx.fillStyle='#e8ecff'; ctx.font='11px system-ui,sans-serif';
     ctx.fillText(label, p.sx+r+3, p.sy-3);
   }
   ctx.restore();
 }
 
-function render(view, fullPts, shownPts, color, startPt, endPt, ballPt) {
-  const { ctx, w, h, cx, cy, scale } = view;
-  ctx.clearRect(0, 0, w, h);
+function renderView(view, trajPts, fullPts, color, ballPt) {
+  const {ctx,w,h,cx,cy,scale}=view;
+  ctx.clearRect(0,0,w,h);
   drawBg(view);
 
-  // Center the view on the current ball position so the ball stays mid-screen.
-  const bt = trajXform(ballPt || shownPts[shownPts.length-1] || fullPts[0], view);
-  const bsx = cx + bt.x * scale;
-  const bsy = cy - bt.y * scale;
-  const dx = cx - bsx, dy = cy - bsy;
-
-  ctx.save();
-  ctx.translate(dx, dy);
+  // Offset so ball stays near screen centre
+  const bt=trajXform(ballPt,view);
+  const dx=cx-(cx+bt.x*scale), dy=cy-(cy-bt.y*scale);
+  ctx.save(); ctx.translate(dx,dy);
 
   drawGlobe(view);
-  drawTrail(view, fullPts,  color, 0.3);   // ghost full path
-  drawTrail(view, shownPts, color, 1.0);   // traveled path bright
-  drawDot(view, startPt, COLORS.start, 5.5, '시작');
-  drawDot(view, endPt,   COLORS.end,   5.5, '끝');
-  if (shownPts.length > 0) drawDot(view, ballPt, '#fff', 5);
+  drawTrail(view, fullPts,  color, 0.28);
+  drawTrail(view, trajPts,  color, 1.0);
+  drawDot(view, fullPts[0],                color===COLORS.trailE ? COLORS.start : COLORS.start, 5, '시작');
+  drawDot(view, fullPts[fullPts.length-1], color===COLORS.trailE ? COLORS.end   : COLORS.end,   5, '끝');
+  drawDot(view, ballPt, COLORS.ball, 5);
 
   ctx.restore();
 }
 
-// ---------- Animation loop --------------------------------------------------
+// ─── Animation loop ───────────────────────────────────────────────────────────
 
 let lastT = performance.now();
 
 function loop(now) {
-  const dt = Math.min(0.05, (now - lastT) / 1000);
+  const dt = Math.min(0.05,(now-lastT)/1000);
   lastT = now;
 
   if (state.running) {
     state.elapsed += dt * state.timeScale;
-    if (state.elapsed >= state.duration) { state.elapsed = state.duration; state.running = false; }
+    if (state.elapsed >= ANIM_DUR) { state.elapsed = ANIM_DUR; state.running = false; }
   }
 
-  const frac = Math.min(1, state.elapsed / state.duration);
-  const nE = Math.max(1, Math.round(frac * (traj.earth.length - 1)));
-  const nS = Math.max(1, Math.round(frac * (traj.space.length - 1)));
+  const frac  = Math.min(1, state.elapsed / ANIM_DUR);
+  const nE    = Math.max(1, Math.round(frac * (traj.earth.length-1)));
+  const nS    = Math.max(1, Math.round(frac * (traj.space.length-1)));
+  const physT = frac * state.physDur;
+  const omega = OMEGA_B * state.rotMul;
 
-  const omega = OMEGA_BASE * state.rotationMul;
-  const physT = frac * state.physDuration; // actual physics time elapsed
+  const ef=traj.earth, sf=traj.space;
+  if (!ef.length||!sf.length) { requestAnimationFrame(loop); return; }
 
-  // Both views show the globe rotating at ω.
-  // Earth view: trajectory is in the rotating frame, so it rotates with the globe
-  //   → Coriolis curve stays "painted on" the globe surface.
-  // Space view: trajectory is inertial (trajXform skips earthAngle)
-  //   → globe rotates under the fixed straight-line path.
-  views.earth.earthAngle = omega * physT;
-  views.space.earthAngle = omega * physT;
+  // Rotating views: globe spins
+  views.earth.earthAngle      = omega * physT;
+  views.space.earthAngle      = omega * physT;
+  // Fixed views: globe stays put
+  views.earthFixed.earthAngle = 0;
+  views.spaceFixed.earthAngle = 0;
 
-  const ef = traj.earth, sf = traj.space;
-  if (!ef.length || !sf.length) { requestAnimationFrame(loop); return; }
-
-  render(views.earth, ef, ef.slice(0, nE+1), COLORS.trailEarth, ef[0], ef[ef.length-1], ef[nE]);
-  render(views.space, sf, sf.slice(0, nS+1), COLORS.trailSpace, sf[0], sf[sf.length-1], sf[nS]);
+  // Earth-frame trajectory: traj.earth (lat/lon lines, Coriolis-free path on globe)
+  // Space-frame trajectory: traj.space (inertial = earth-frame lon + earth rotation)
+  renderView(views.earth,      ef.slice(0,nE+1), ef, COLORS.trailE, ef[nE]);
+  renderView(views.space,      sf.slice(0,nS+1), sf, COLORS.trailS, sf[nS]);
+  renderView(views.earthFixed, ef.slice(0,nE+1), ef, COLORS.trailE, ef[nE]);
+  renderView(views.spaceFixed, sf.slice(0,nS+1), sf, COLORS.trailS, sf[nS]);
 
   requestAnimationFrame(loop);
 }
 
-// ---------- Explanations ----------------------------------------------------
+// ─── Explanation ──────────────────────────────────────────────────────────────
 
 function updateExp() {
-  const hs = state.hemisphere === 'N' ? '북반구' : '남반구';
-  const d  = state.hemisphere === 'N' ? '오른쪽' : '왼쪽';
+  const hs = state.hemisphere==='N' ? '북반구' : '남반구';
+  const d  = state.hemisphere==='N' ? '오른쪽' : '왼쪽';
   const map = {
-    'eq-to-pole': `적도에서 ${hs}의 극을 향해 던진 공은 자전의 동쪽 접선 속도를 가지고 출발합니다. 고위도로 갈수록 지표 자전 속도가 느려지므로 지구 관측자 눈에는 공이 ${d}(동쪽)으로 휘어 보입니다.`,
-    'pole-to-eq': `극 근처에서 적도로 던진 공은 초기 접선 속도가 거의 없습니다. 저위도로 내려올수록 지면이 더 빠르게 동으로 움직여 공이 ${d}(서쪽)으로 뒤처지는 것처럼 보입니다.`,
-    'eastward':   `${hs}에서 동쪽으로 던진 공은 원심 효과가 커져 적도 쪽(${d})으로 휘어 보입니다.`,
-    'westward':   `${hs}에서 서쪽으로 던진 공은 원심 효과가 줄어 극 쪽(${d})으로 휘어 보입니다.`,
+    'eq-to-pole': `${hs}: 적도에서 극으로 경도선을 따라 이동합니다. 지구 고정 시점(아래 왼쪽)에서는 경도선을 직선으로 따라가지만, 우주 고정 시점(아래 오른쪽)에서는 지구 자전이 더해져 나선형으로 보입니다.`,
+    'pole-to-eq': `${hs}: 극에서 적도 방향으로 경도선을 따라 이동합니다. 지구 고정(아래 왼쪽) = 직선, 우주 고정(아래 오른쪽) = 나선.`,
+    'eastward':   `${hs}: 위도선을 따라 동쪽으로 이동합니다. 지구 고정(아래 왼쪽) = 위도선 원, 우주 고정(아래 오른쪽) = 지구 자전 속도가 더해진 더 빠른 원.`,
+    'westward':   `${hs}: 위도선을 따라 서쪽으로 이동합니다. 지구 고정(아래 왼쪽) = 위도선 원, 우주 고정(아래 오른쪽) = 지구 자전 속도가 일부 상쇄된 원.`,
   };
   ui.exp.textContent = map[state.scenario] || '';
 }

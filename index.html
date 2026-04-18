@@ -15,14 +15,21 @@
   <main class="app-main">
     <section class="viewers">
       <div class="viewer">
-        <div class="viewer-label">지구 관측자 시점 (회전 좌표계)</div>
+        <div class="viewer-label">지구 관측자 시점 — 지구 회전 중</div>
         <canvas id="earthView"></canvas>
         <div class="viewer-hint" id="earthViewHint">공이 휘어져 보입니다</div>
       </div>
       <div class="viewer">
-        <div class="viewer-label">우주 관측자 시점 (관성 좌표계)</div>
+        <div class="viewer-label">우주 관측자 시점 — 지구 회전 중</div>
         <canvas id="spaceView"></canvas>
-        <div class="viewer-hint" id="spaceViewHint">공은 직선으로 움직입니다</div>
+      </div>
+      <div class="viewer">
+        <div class="viewer-label">지구 관측자 시점 — 지구 고정</div>
+        <canvas id="earthFixed"></canvas>
+      </div>
+      <div class="viewer">
+        <div class="viewer-label">우주 관측자 시점 — 지구 고정</div>
+        <canvas id="spaceFixed"></canvas>
       </div>
     </section>
 
