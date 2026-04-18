@@ -203,10 +203,14 @@ function bindSlider(inputId, valueId, onChange) {
 }
 
 function applyHemisphereCamera() {
-  const y = state.hemisphere === 'N' ? 1.4 : -1.4;
+  // Mid-latitude (~45°) viewpoint so both the pole and the equator are visible.
+  const sign = state.hemisphere === 'N' ? 1 : -1;
   for (const view of [views.earth, views.space]) {
-    view.camera.position.set(0, y, 2.6);
-    view.controls.target.set(0, 0, 0);
+    view.camera.position.set(0, sign * 2.0, 2.0);
+    view.camera.up.set(0, sign, 0);
+    view.controls.target.set(0, sign * 0.35, 0);
+    view.controls.minPolarAngle = state.hemisphere === 'N' ? 0 : Math.PI / 2;
+    view.controls.maxPolarAngle = state.hemisphere === 'N' ? Math.PI / 2 : Math.PI;
     view.controls.update();
   }
 }
