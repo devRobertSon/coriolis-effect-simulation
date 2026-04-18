@@ -136,45 +136,46 @@ function toScreen(p, view) {
   return { sx: view.cx + p.x*view.scale, sy: view.cy - p.y*view.scale, z: p.z };
 }
 
-// ─── Physics: ball moves along lat/lon surface lines ─────────────────────────
-
-function scenarioParams() {
-  const hs  = state.hemisphere === 'N' ? 1 : -1;
-  const LAM = Math.PI / 2;          // starting longitude (front-centre of tilted view)
-  const rate = 0.18 * state.speedMul; // rad / physics-second
-
-  switch (state.scenario) {
-    case 'eq-to-pole':
-      return { phi0: 0,                      lam0: LAM,
-               dPhi: hs * rate,              dLam: 0 };
-    case 'pole-to-eq':
-      return { phi0: hs * (Math.PI/2 - 0.15), lam0: LAM,
-               dPhi: -hs * rate,             dLam: 0 };
-    case 'eastward':
-      return { phi0: hs * Math.PI/6,         lam0: LAM,
-               dPhi: 0,                      dLam: rate };
-    case 'westward':
-      return { phi0: hs * Math.PI/6,         lam0: LAM,
-               dPhi: 0,                      dLam: -rate };
-  }
-}
+// ─── Physics: straight-line motion in inertial (space) frame ─────────────────
+// traj.space[i] = inertial 3-D position (straight line)
+// traj.earth[i] = same position rotated back into the rotating earth frame
 
 function buildTraj() {
   state.elapsed = 0;
   traj.earth = []; traj.space = [];
 
-  const { phi0, lam0, dPhi, dLam } = scenarioParams();
+  const hs    = state.hemisphere === 'N' ? 1 : -1;
   const omega = OMEGA_B * state.rotMul;
-  state.physDur = (45 * Math.PI / 180) / (Math.abs(dPhi) || Math.abs(dLam) || 0.01);
+  const spd   = 0.09 * state.speedMul;
+  const LAM   = Math.PI / 2;
 
+  let p0, v0;
+  switch (state.scenario) {
+    case 'eq-to-pole':
+      p0 = latLon(0, LAM);
+      v0 = v3(0, hs * spd, 0);           // straight up/down on screen
+      break;
+    case 'pole-to-eq':
+      p0 = latLon(hs * (Math.PI/2 - 0.2), LAM);
+      v0 = v3(0, -hs * spd, 0);
+      break;
+    case 'eastward':
+      p0 = latLon(hs * Math.PI/6, LAM);
+      v0 = v3(-spd * Math.cos(hs * Math.PI/6), 0, 0); // straight left on screen
+      break;
+    case 'westward':
+      p0 = latLon(hs * Math.PI/6, LAM);
+      v0 = v3( spd * Math.cos(hs * Math.PI/6), 0, 0); // straight right on screen
+      break;
+  }
+
+  state.physDur = ANIM_DUR;
   const STEPS = 300;
   for (let i = 0; i <= STEPS; i++) {
-    const t   = (i / STEPS) * state.physDur;
-    const phi = phi0 + dPhi * t;
-    const lam = lam0 + dLam * t;          // longitude in earth frame
-
-    traj.earth.push(latLon(phi, lam));
-    traj.space.push(latLon(phi, lam + omega * t)); // add earth's rotation → inertial lon
+    const t  = (i / STEPS) * state.physDur;
+    const ps = v3(p0.x + v0.x*t, p0.y + v0.y*t, p0.z + v0.z*t); // inertial straight line
+    traj.space.push(ps);
+    traj.earth.push(rotY(ps, -omega * t)); // earth frame = rotate inertial pos backward
   }
 
   for (const v of allViews()) v.earthAngle = 0;
@@ -300,23 +301,15 @@ function drawDot(view, pt, color, r, label) {
 }
 
 function renderView(view, trajPts, fullPts, color, ballPt) {
-  const {ctx,w,h,cx,cy,scale}=view;
+  const {ctx,w,h}=view;
   ctx.clearRect(0,0,w,h);
   drawBg(view);
-
-  // Offset so ball stays near screen centre
-  const bt=trajXform(ballPt,view);
-  const dx=cx-(cx+bt.x*scale), dy=cy-(cy-bt.y*scale);
-  ctx.save(); ctx.translate(dx,dy);
-
   drawGlobe(view);
-  drawTrail(view, fullPts,  color, 0.28);
-  drawTrail(view, trajPts,  color, 1.0);
-  drawDot(view, fullPts[0],                color===COLORS.trailE ? COLORS.start : COLORS.start, 5, '시작');
-  drawDot(view, fullPts[fullPts.length-1], color===COLORS.trailE ? COLORS.end   : COLORS.end,   5, '끝');
+  drawTrail(view, fullPts, color, 0.28);
+  drawTrail(view, trajPts, color, 1.0);
+  drawDot(view, fullPts[0],                COLORS.start, 5, '시작');
+  drawDot(view, fullPts[fullPts.length-1], COLORS.end,   5, '끝');
   drawDot(view, ballPt, COLORS.ball, 5);
-
-  ctx.restore();
 }
 
 // ─── Animation loop ───────────────────────────────────────────────────────────
