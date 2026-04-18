@@ -4,7 +4,7 @@
 //          fixed-earth   × {earth-frame, inertial-frame}
 
 const EARTH_R  = 1.0;
-const OMEGA_B  = 0.55; // exaggerated rotation speed
+const OMEGA_B  = 0.165; // exaggerated rotation speed (slider 1.0 ≈ old 0.3x)
 const ANIM_DUR = 6.0;
 
 const state = {
