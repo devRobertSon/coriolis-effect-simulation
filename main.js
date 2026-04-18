@@ -31,6 +31,8 @@ let views = {}, ui = {}, traj = { earth: [], space: [] }, stars = null;
 window.addEventListener('DOMContentLoaded', () => {
   views.earth = makeView(document.getElementById('earthView'));
   views.space = makeView(document.getElementById('spaceView'));
+  views.earth.trajFollowsGlobe = true;  // rotating frame: trajectory painted on globe
+  views.space.trajFollowsGlobe = false; // inertial frame: trajectory fixed, globe rotates past
   bindUI();
   buildTrajectory();
   window.addEventListener('resize', onResize);
@@ -117,7 +119,12 @@ function tilt() { return state.hemisphere === 'N' ? Math.PI/5 : -Math.PI/5; }
 // Camera transform for globe surface (applies earth rotation + tilt)
 function globeXform(v, view) { return rotX(rotY(v, view.earthAngle), tilt()); }
 // Camera transform for trajectory (only tilt — trajectory is already in its frame)
-function trajXform(v) { return rotX(v, tilt()); }
+// Earth view: trajectory is in rotating frame → rotate display with globe (same earthAngle).
+// Space view: trajectory is in inertial frame → only camera tilt, no Y rotation.
+function trajXform(v, view) {
+  if (view && view.trajFollowsGlobe) return globeXform(v, view);
+  return rotX(v, tilt());
+}
 
 function toScreen(p, view) {
   return { sx: view.cx + p.x * view.scale, sy: view.cy - p.y * view.scale, z: p.z };
@@ -128,11 +135,13 @@ function toScreen(p, view) {
 function scenarios() {
   const hs = state.hemisphere === 'N' ? 1 : -1;
   const phi30 = hs * Math.PI / 6;
+  // lam0 = π/2 places the start point at the front-center of the tilted globe view.
+  const L = Math.PI / 2;
   switch (state.scenario) {
-    case 'eq-to-pole':  return { phi0: 0,               lam0: 0, dE: 0,  dN: hs };
-    case 'pole-to-eq':  return { phi0: hs*(Math.PI/2-0.18), lam0: 0, dE: 0,  dN: -hs };
-    case 'eastward':    return { phi0: phi30,             lam0: 0, dE: 1,  dN: 0 };
-    case 'westward':    return { phi0: phi30,             lam0: 0, dE: -1, dN: 0 };
+    case 'eq-to-pole':  return { phi0: 0,                    lam0: L, dE: 0,  dN: hs };
+    case 'pole-to-eq':  return { phi0: hs*(Math.PI/2-0.18),  lam0: L, dE: 0,  dN: -hs };
+    case 'eastward':    return { phi0: phi30,                 lam0: L, dE: 1,  dN: 0 };
+    case 'westward':    return { phi0: phi30,                 lam0: L, dE: -1, dN: 0 };
   }
 }
 
@@ -279,7 +288,7 @@ function drawTrail(view, pts, color, alpha) {
   // back pass (faded)
   ctx.beginPath(); let pen = false;
   for (const pt of pts) {
-    const t = trajXform(pt); if (t.z >= 0) { pen = false; continue; }
+    const t = trajXform(pt, view); if (t.z >= 0) { pen = false; continue; }
     const p = toScreen(t, view);
     if (!pen) { ctx.moveTo(p.sx,p.sy); pen=true; } else ctx.lineTo(p.sx,p.sy);
   }
@@ -287,7 +296,7 @@ function drawTrail(view, pts, color, alpha) {
   // front pass
   ctx.beginPath(); pen = false;
   for (const pt of pts) {
-    const t = trajXform(pt); if (t.z < 0) { pen = false; continue; }
+    const t = trajXform(pt, view); if (t.z < 0) { pen = false; continue; }
     const p = toScreen(t, view);
     if (!pen) { ctx.moveTo(p.sx,p.sy); pen=true; } else ctx.lineTo(p.sx,p.sy);
   }
@@ -296,7 +305,7 @@ function drawTrail(view, pts, color, alpha) {
 }
 
 function drawDot(view, pt3, color, r, label) {
-  const t = trajXform(pt3);
+  const t = trajXform(pt3, view);
   const p = toScreen(t, view);
   const { ctx } = view;
   ctx.save();
@@ -317,7 +326,7 @@ function render(view, fullPts, shownPts, color, startPt, endPt, ballPt) {
   drawBg(view);
 
   // Center the view on the current ball position so the ball stays mid-screen.
-  const bt = trajXform(ballPt || shownPts[shownPts.length-1] || fullPts[0]);
+  const bt = trajXform(ballPt || shownPts[shownPts.length-1] || fullPts[0], view);
   const bsx = cx + bt.x * scale;
   const bsy = cy - bt.y * scale;
   const dx = cx - bsx, dy = cy - bsy;
@@ -355,8 +364,13 @@ function loop(now) {
   const omega = OMEGA_BASE * state.rotationMul;
   const physT = frac * state.physDuration; // actual physics time elapsed
 
-  views.earth.earthAngle = 0;                   // earth view: globe is stationary
-  views.space.earthAngle = omega * physT;        // space view: globe rotates
+  // Both views show the globe rotating at ω.
+  // Earth view: trajectory is in the rotating frame, so it rotates with the globe
+  //   → Coriolis curve stays "painted on" the globe surface.
+  // Space view: trajectory is inertial (trajXform skips earthAngle)
+  //   → globe rotates under the fixed straight-line path.
+  views.earth.earthAngle = omega * physT;
+  views.space.earthAngle = omega * physT;
 
   const ef = traj.earth, sf = traj.space;
   if (!ef.length || !sf.length) { requestAnimationFrame(loop); return; }
