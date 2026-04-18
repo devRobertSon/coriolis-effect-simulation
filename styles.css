@@ -74,7 +74,8 @@ body::before {
 
 .viewers {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
   gap: 16px;
 }
 
@@ -85,8 +86,8 @@ body::before {
   border-radius: 16px;
   overflow: hidden;
   backdrop-filter: blur(6px);
-  aspect-ratio: 1 / 1;
-  min-height: 360px;
+  min-height: 320px;
+  aspect-ratio: 16 / 7;
 }
 
 .viewer canvas {
@@ -247,8 +248,8 @@ body::before {
 }
 
 @media (max-width: 720px) {
-  .viewers { grid-template-columns: 1fr; }
   .app-header { padding: 18px 18px 4px; }
   .app-main { padding: 12px 18px 18px; }
   .app-footer { padding: 10px 18px 18px; }
+  .viewer { min-height: 320px; }
 }
