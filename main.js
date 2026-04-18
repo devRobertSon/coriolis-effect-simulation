@@ -1,9 +1,9 @@
-// Coriolis simulation — 2D canvas with pseudo-3D (orthographic) projection of a
-// rotating sphere. Two stacked views: the ball's trajectory in the rotating
-// (Earth observer) frame and in the inertial (space observer) frame.
+// Coriolis effect — 2D canvas, pseudo-3D orthographic projection.
+// Earth view: rotating frame (Coriolis visible).
+// Space view: inertial frame (straight-line path).
 
 const EARTH_R = 1.0;
-const OMEGA_BASE = 0.45; // radians per simulated second at rotation multiplier 1
+const OMEGA_BASE = 0.55; // exaggerated for visibility
 
 const state = {
   hemisphere: 'N',
@@ -13,217 +13,172 @@ const state = {
   timeScale: 1.0,
   running: false,
   elapsed: 0,
-  duration: 8.0,
+  duration: 6.0,
+  physDuration: 1.4, // physics seconds the arc takes
 };
 
 const COLORS = {
-  bgGrad0: '#0a1230',
-  bgGrad1: '#05070f',
-  oceanFar: '#0b2a5a',
-  oceanNear: '#1a60c8',
-  grid: 'rgba(160, 200, 255, 0.22)',
-  equator: '#ffd166',
-  axis: 'rgba(255, 123, 208, 0.55)',
-  trailEarth: '#ffd166',
-  trailSpace: '#6ea8ff',
-  ball: '#ffffff',
-  startMark: '#7bd88f',
-  endMark: '#ff6b9a',
-  star: 'rgba(255,255,255,0.85)',
+  bg0: '#07102a', bg1: '#030810',
+  ocean: '#1255a8', oceanEdge: '#092555',
+  grid: 'rgba(140,190,255,0.2)', equator: '#ffd166',
+  axis: 'rgba(255,123,208,0.5)',
+  trailEarth: '#ffd166', trailSpace: '#6ea8ff',
+  ball: '#ffffff', start: '#7bd88f', end: '#ff6b9a',
 };
 
-const views = { earth: null, space: null };
-const ui = {};
-let trajectory = { earth: [], space: [] };
-let stars = null;
+let views = {}, ui = {}, traj = { earth: [], space: [] }, stars = null;
 
-init();
-
-function init() {
-  views.earth = setupView(document.getElementById('earthView'), { rotating: true });
-  views.space = setupView(document.getElementById('spaceView'), { rotating: false });
-
+window.addEventListener('DOMContentLoaded', () => {
+  views.earth = makeView(document.getElementById('earthView'));
+  views.space = makeView(document.getElementById('spaceView'));
   bindUI();
-  resetTrajectory();
-
+  buildTrajectory();
   window.addEventListener('resize', onResize);
   onResize();
+  requestAnimationFrame(loop);
+});
 
-  requestAnimationFrame(animate);
+function makeView(canvas) {
+  return { canvas, ctx: canvas.getContext('2d'), w: 0, h: 0, scale: 1, cx: 0, cy: 0, earthAngle: 0 };
 }
 
-function setupView(canvas, { rotating }) {
-  return {
-    canvas,
-    ctx: canvas.getContext('2d'),
-    rotating,
-    width: 0,
-    height: 0,
-    scale: 200, // pixels per unit radius, computed on fit
-    cx: 0,
-    cy: 0,
-    earthAngle: 0, // current Earth rotation (for space view)
-  };
-}
+// ---------- UI --------------------------------------------------------------
 
 function bindUI() {
-  ui.playBtn = document.getElementById('playBtn');
-  ui.pauseBtn = document.getElementById('pauseBtn');
-  ui.stopBtn = document.getElementById('stopBtn');
-  ui.explanation = document.getElementById('explanation');
+  ui.play  = document.getElementById('playBtn');
+  ui.pause = document.getElementById('pauseBtn');
+  ui.stop  = document.getElementById('stopBtn');
+  ui.exp   = document.getElementById('explanation');
 
-  ui.playBtn.addEventListener('click', () => {
-    if (state.elapsed >= state.duration) resetTrajectory();
-    state.running = true;
-  });
-  ui.pauseBtn.addEventListener('click', () => { state.running = false; });
-  ui.stopBtn.addEventListener('click', () => { state.running = false; resetTrajectory(); });
+  ui.play.addEventListener('click', () => { if (state.elapsed >= state.duration) buildTrajectory(); state.running = true; });
+  ui.pause.addEventListener('click', () => { state.running = false; });
+  ui.stop.addEventListener('click', () => { state.running = false; buildTrajectory(); });
 
-  document.querySelectorAll('.btn.toggle[data-hemi]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.btn.toggle[data-hemi]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
-      btn.setAttribute('aria-pressed', 'true');
-      state.hemisphere = btn.dataset.hemi;
-      resetTrajectory();
-      updateExplanation();
-    });
-  });
+  document.querySelectorAll('.btn.toggle[data-hemi]').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.btn.toggle[data-hemi]').forEach(x => x.setAttribute('aria-pressed', 'false'));
+    b.setAttribute('aria-pressed', 'true');
+    state.hemisphere = b.dataset.hemi;
+    buildTrajectory(); updateExp();
+  }));
 
-  document.querySelectorAll('.btn.scenario').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.btn.scenario').forEach((b) => b.setAttribute('aria-pressed', 'false'));
-      btn.setAttribute('aria-pressed', 'true');
-      state.scenario = btn.dataset.scenario;
-      resetTrajectory();
-      updateExplanation();
-    });
-  });
+  document.querySelectorAll('.btn.scenario').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.btn.scenario').forEach(x => x.setAttribute('aria-pressed', 'false'));
+    b.setAttribute('aria-pressed', 'true');
+    state.scenario = b.dataset.scenario;
+    buildTrajectory(); updateExp();
+  }));
 
-  bindSlider('speedSlider', 'speedValue', (v) => { state.speedMul = v; resetTrajectory(); });
-  bindSlider('rotationSlider', 'rotationValue', (v) => { state.rotationMul = v; resetTrajectory(); });
-  bindSlider('timeScaleSlider', 'timeScaleValue', (v) => { state.timeScale = v; });
+  bindSlider('speedSlider',    'speedValue',    v => { state.speedMul    = v; buildTrajectory(); });
+  bindSlider('rotationSlider', 'rotationValue', v => { state.rotationMul = v; buildTrajectory(); });
+  bindSlider('timeScaleSlider','timeScaleValue',v => { state.timeScale   = v; });
 
-  updateExplanation();
+  updateExp();
 }
 
-function bindSlider(inputId, valueId, onChange) {
-  const input = document.getElementById(inputId);
-  const out = document.getElementById(valueId);
-  const apply = () => {
-    const v = parseFloat(input.value);
-    out.textContent = v.toFixed(2);
-    onChange(v);
-  };
-  input.addEventListener('input', apply);
-  apply();
+function bindSlider(id, outId, fn) {
+  const el = document.getElementById(id), out = document.getElementById(outId);
+  const apply = () => { const v = parseFloat(el.value); out.textContent = v.toFixed(2); fn(v); };
+  el.addEventListener('input', apply); apply();
 }
 
-// ---------- Physics / geometry ----------------------------------------------
+// ---------- Math helpers ----------------------------------------------------
 
-function latLonToVec3(phi, lambda, r = EARTH_R) {
-  return {
-    x: r * Math.cos(phi) * Math.cos(lambda),
-    y: r * Math.sin(phi),
-    z: r * Math.cos(phi) * Math.sin(lambda),
-  };
+function v3(x, y, z) { return { x, y, z }; }
+
+function latLon(phi, lam, r = EARTH_R) {
+  return v3(r * Math.cos(phi) * Math.cos(lam),
+            r * Math.sin(phi),
+            r * Math.cos(phi) * Math.sin(lam));
 }
 
-function eastNorth(phi, lambda) {
-  return {
-    east: { x: -Math.sin(lambda), y: 0, z: Math.cos(lambda) },
-    north: {
-      x: -Math.sin(phi) * Math.cos(lambda),
-      y: Math.cos(phi),
-      z: -Math.sin(phi) * Math.sin(lambda),
-    },
-  };
-}
+function add3(a, b)     { return v3(a.x+b.x, a.y+b.y, a.z+b.z); }
+function scale3(a, k)   { return v3(a.x*k, a.y*k, a.z*k); }
+function len3(a)        { return Math.hypot(a.x, a.y, a.z); }
+function norm3(a)       { const l = len3(a)||1; return scale3(a, 1/l); }
+function dot3(a, b)     { return a.x*b.x + a.y*b.y + a.z*b.z; }
 
-function rotateY(v, a) {
+function rotY(v, a) {
   const c = Math.cos(a), s = Math.sin(a);
-  return { x: c * v.x + s * v.z, y: v.y, z: -s * v.x + c * v.z };
+  return v3(c*v.x + s*v.z, v.y, -s*v.x + c*v.z);
+}
+function rotX(v, a) {
+  const c = Math.cos(a), s = Math.sin(a);
+  return v3(v.x, c*v.y - s*v.z, s*v.y + c*v.z);
 }
 
-function projectToSphere(v) {
-  const r = Math.hypot(v.x, v.y, v.z);
-  if (r === 0) return { x: EARTH_R, y: 0, z: 0 };
-  const k = EARTH_R / r;
-  return { x: v.x * k, y: v.y * k, z: v.z * k };
+function onSphere(v) {
+  const l = len3(v); if (l === 0) return v3(1,0,0);
+  return scale3(v, EARTH_R / l);
 }
 
-function initialConditions() {
-  const hemiSign = state.hemisphere === 'N' ? 1 : -1;
-  const phiMid = hemiSign * Math.PI / 6; // 30° latitude
+// tilt: positive tilts north pole toward viewer (+z). Sign depends on hemisphere.
+function tilt() { return state.hemisphere === 'N' ? Math.PI/5 : -Math.PI/5; }
 
-  let startPhi = phiMid;
-  let startLambda = 0;
-  let dirEast = 0;
-  let dirNorth = 0;
+// Camera transform for globe surface (applies earth rotation + tilt)
+function globeXform(v, view) { return rotX(rotY(v, view.earthAngle), tilt()); }
+// Camera transform for trajectory (only tilt — trajectory is already in its frame)
+function trajXform(v) { return rotX(v, tilt()); }
 
+function toScreen(p, view) {
+  return { sx: view.cx + p.x * view.scale, sy: view.cy - p.y * view.scale, z: p.z };
+}
+
+// ---------- Physics ---------------------------------------------------------
+
+function scenarios() {
+  const hs = state.hemisphere === 'N' ? 1 : -1;
+  const phi30 = hs * Math.PI / 6;
   switch (state.scenario) {
-    case 'eq-to-pole':
-      startPhi = 0;
-      dirNorth = hemiSign;
-      break;
-    case 'pole-to-eq':
-      startPhi = hemiSign * (Math.PI / 2 - 0.15);
-      dirNorth = -hemiSign;
-      break;
-    case 'eastward':
-      startPhi = phiMid;
-      dirEast = 1;
-      break;
-    case 'westward':
-      startPhi = phiMid;
-      dirEast = -1;
-      break;
+    case 'eq-to-pole':  return { phi0: 0,               lam0: 0, dE: 0,  dN: hs };
+    case 'pole-to-eq':  return { phi0: hs*(Math.PI/2-0.18), lam0: 0, dE: 0,  dN: -hs };
+    case 'eastward':    return { phi0: phi30,             lam0: 0, dE: 1,  dN: 0 };
+    case 'westward':    return { phi0: phi30,             lam0: 0, dE: -1, dN: 0 };
   }
-  return { startPhi, startLambda, dirEast, dirNorth };
 }
 
-function resetTrajectory() {
+function buildTrajectory() {
   state.elapsed = 0;
-  trajectory = { earth: [], space: [] };
+  traj.earth = []; traj.space = [];
 
-  const { startPhi, startLambda, dirEast, dirNorth } = initialConditions();
-  const speed = 0.55 * state.speedMul;
-  const omega = OMEGA_BASE * state.rotationMul;
+  const { phi0, lam0, dE, dN } = scenarios();
+  const speed  = 0.55 * state.speedMul;
+  const omega  = OMEGA_BASE * state.rotationMul;
+  const hs     = state.hemisphere === 'N' ? 1 : -1;
 
-  const startPos = latLonToVec3(startPhi, startLambda);
-  const { east, north } = eastNorth(startPhi, startLambda);
+  const pos0 = latLon(phi0, lam0);
 
-  const dir = {
-    x: east.x * dirEast + north.x * dirNorth,
-    y: east.y * dirEast + north.y * dirNorth,
-    z: east.z * dirEast + north.z * dirNorth,
-  };
-  const dlen = Math.hypot(dir.x, dir.y, dir.z) || 1;
-  dir.x /= dlen; dir.y /= dlen; dir.z /= dlen;
+  // Local east/north unit vectors at launch point
+  const eastV  = norm3(v3(-Math.sin(lam0), 0, Math.cos(lam0)));
+  const northV = norm3(v3(-Math.sin(phi0)*Math.cos(lam0), Math.cos(phi0), -Math.sin(phi0)*Math.sin(lam0)));
 
-  // Inertial velocity = launch tangent velocity + co-rotating surface velocity
-  // (ω × r) = (0, ω, 0) × (x, y, z) = (ω·z, 0, -ω·x). Wait: (a × b)_x = a_y b_z - a_z b_y.
-  // With a = (0, ω, 0), b = (x, y, z): (ω·z - 0, 0 - 0, 0 - ω·x) = (ω·z, 0, -ω·x).
-  const surfaceVel = { x: omega * startPos.z, y: 0, z: -omega * startPos.x };
-  const vel = {
-    x: dir.x * speed + surfaceVel.x,
-    y: dir.y * speed + surfaceVel.y,
-    z: dir.z * speed + surfaceVel.z,
-  };
+  const launchDir = norm3(add3(scale3(eastV, dE), scale3(northV, dN)));
 
-  state.duration = 8.0;
-  const steps = 240;
+  // Inertial velocity = launch direction + surface co-rotation
+  // ω × r, with ω = (0, omega, 0): (omega*z, 0, -omega*x)
+  const surfVel = v3(omega * pos0.z, 0, -omega * pos0.x);
+  const vel = add3(scale3(launchDir, speed), surfVel);
+
+  // Cap physics duration so arc ≈ 50° max, stays in hemisphere
+  const arcRad = (50 * Math.PI / 180);
+  state.physDuration = arcRad / speed;
+  state.duration = 6.0;
+
+  const steps = 300;
   for (let i = 0; i <= steps; i++) {
-    const t = (i / steps) * state.duration;
-    const inertial = {
-      x: startPos.x + vel.x * t,
-      y: startPos.y + vel.y * t,
-      z: startPos.z + vel.z * t,
-    };
-    const spaceGround = projectToSphere(inertial);
-    trajectory.space.push(spaceGround);
+    const t = (i / steps) * state.physDuration;
 
-    const earthFrame = rotateY(inertial, -omega * t);
-    trajectory.earth.push(projectToSphere(earthFrame));
+    // Inertial position (straight line)
+    const inert = add3(pos0, scale3(vel, t));
+
+    // Space view: project inertial position to sphere
+    const spPt = onSphere(inert);
+    // Stop if trajectory drifts to wrong hemisphere
+    if (spPt.y * hs < -0.08) break;
+    traj.space.push(spPt);
+
+    // Earth view: de-rotate inertial position by omega*t → rotating frame
+    const earthPt = onSphere(rotY(inert, -omega * t));
+    traj.earth.push(earthPt);
   }
 
   views.earth.earthAngle = 0;
@@ -234,344 +189,194 @@ function resetTrajectory() {
 
 function onResize() {
   for (const v of [views.earth, views.space]) {
-    const rect = v.canvas.getBoundingClientRect();
+    const r = v.canvas.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    v.canvas.width = Math.max(2, Math.floor(rect.width * dpr));
-    v.canvas.height = Math.max(2, Math.floor(rect.height * dpr));
-    v.width = rect.width;
-    v.height = rect.height;
+    v.canvas.width  = Math.max(2, Math.round(r.width  * dpr));
+    v.canvas.height = Math.max(2, Math.round(r.height * dpr));
+    v.w = r.width; v.h = r.height;
     v.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    v.cx = rect.width / 2;
-    v.cy = rect.height / 2;
-    // Leave room so the entire trajectory (can extend beyond the globe's
-    // silhouette) stays on screen.
-    v.scale = Math.min(rect.width, rect.height) * 0.38;
+    v.cx = r.width / 2; v.cy = r.height / 2;
+    v.scale = Math.min(r.width, r.height) * 0.36;
   }
-  if (!stars) stars = genStars(220);
+  if (!stars) stars = Array.from({length:250}, () => ({
+    x: Math.random(), y: Math.random(),
+    r: Math.random()*1.3+0.2, a: Math.random()*0.7+0.2,
+  }));
 }
 
-function genStars(n) {
-  const arr = [];
-  for (let i = 0; i < n; i++) {
-    arr.push({
-      x: Math.random(),
-      y: Math.random(),
-      r: Math.random() * 1.4 + 0.2,
-      a: Math.random() * 0.7 + 0.2,
-    });
-  }
-  return arr;
-}
-
-// View orientation: we tilt the sphere so the selected hemisphere is toward
-// the viewer. Rotation by angle `tilt` around the X axis maps Earth's Y axis
-// (pole) forward-and-up. Then we project (x,z) directly to screen with y
-// giving depth shading. A secondary rotation around Y animates the globe in
-// the space view.
-function tiltAngle() {
-  // For N hemisphere we look slightly down onto the northern hemisphere.
-  // For S hemisphere, we look slightly up onto the southern hemisphere.
-  return state.hemisphere === 'N' ? -Math.PI / 5 : Math.PI / 5;
-}
-
-function rotateX(v, a) {
-  const c = Math.cos(a), s = Math.sin(a);
-  return { x: v.x, y: c * v.y - s * v.z, z: s * v.y + c * v.z };
-}
-
-function viewTransform(v, view) {
-  // Apply the view's own Earth rotation (space view animates), then tilt.
-  let p = rotateY(v, view.earthAngle);
-  p = rotateX(p, tiltAngle());
-  return p;
-}
-
-function project(p, view) {
-  return {
-    sx: view.cx + p.x * view.scale,
-    sy: view.cy - p.y * view.scale, // screen-y goes down
-    depth: p.z, // +z = toward viewer after transform
-  };
-}
-
-function drawBackground(view) {
-  const { ctx, width, height } = view;
-  const g = ctx.createLinearGradient(0, 0, 0, height);
-  g.addColorStop(0, COLORS.bgGrad0);
-  g.addColorStop(1, COLORS.bgGrad1);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, width, height);
-
+function drawBg(view) {
+  const { ctx, w, h, cx, cy, scale } = view;
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, COLORS.bg0); g.addColorStop(1, COLORS.bg1);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
   ctx.save();
   for (const s of stars) {
     ctx.globalAlpha = s.a;
-    ctx.fillStyle = COLORS.star;
-    ctx.beginPath();
-    ctx.arc(s.x * width, s.y * height, s.r, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(s.x*w, s.y*h, s.r, 0, Math.PI*2); ctx.fill();
   }
   ctx.restore();
 }
 
 function drawGlobe(view) {
   const { ctx, cx, cy, scale } = view;
+  // shaded disk
+  const g = ctx.createRadialGradient(cx-scale*0.3, cy-scale*0.3, scale*0.1, cx, cy, scale);
+  g.addColorStop(0, '#3472d4'); g.addColorStop(0.6, COLORS.ocean); g.addColorStop(1, COLORS.oceanEdge);
+  ctx.beginPath(); ctx.arc(cx, cy, scale, 0, Math.PI*2);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(120,170,255,0.3)'; ctx.stroke();
 
-  // Globe disk with radial shading for a 3D look
-  const grad = ctx.createRadialGradient(
-    cx - scale * 0.35, cy - scale * 0.35, scale * 0.15,
-    cx, cy, scale
-  );
-  grad.addColorStop(0, '#3d86ff');
-  grad.addColorStop(0.55, COLORS.oceanNear);
-  grad.addColorStop(1, COLORS.oceanFar);
+  // graticule — lat circles every 30°, meridians every 30°
+  ctx.strokeStyle = COLORS.grid; ctx.lineWidth = 0.8;
+  for (let lat = -60; lat <= 60; lat += 30) drawLatCircle(view, lat * Math.PI/180);
+  for (let lon = 0; lon < 360; lon += 30) drawMeridian(view, lon * Math.PI/180);
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, scale, 0, Math.PI * 2);
-  ctx.fillStyle = grad;
-  ctx.fill();
+  // equator highlight
+  ctx.strokeStyle = COLORS.equator; ctx.globalAlpha = 0.7; ctx.lineWidth = 1.4;
+  drawLatCircle(view, 0); ctx.globalAlpha = 1;
 
-  // Atmosphere glow
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = 'rgba(140, 180, 255, 0.35)';
+  // axis
+  const tp = toScreen(globeXform(v3(0,1.22,0), view), view);
+  const bp = toScreen(globeXform(v3(0,-1.22,0), view), view);
+  ctx.strokeStyle = COLORS.axis; ctx.lineWidth = 1; ctx.globalAlpha = 0.6;
+  ctx.beginPath(); ctx.moveTo(tp.sx,tp.sy); ctx.lineTo(bp.sx,bp.sy); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function drawLatCircle(view, phi) {
+  const { ctx } = view;
+  const segs = 90;
+  ctx.beginPath(); let pen = false;
+  for (let i = 0; i <= segs; i++) {
+    const lam = (i/segs) * Math.PI * 2;
+    const t = globeXform(latLon(phi, lam, EARTH_R*1.001), view);
+    if (t.z < 0) { pen = false; continue; }
+    const p = toScreen(t, view);
+    if (!pen) { ctx.moveTo(p.sx, p.sy); pen = true; } else ctx.lineTo(p.sx, p.sy);
+  }
   ctx.stroke();
+}
+
+function drawMeridian(view, lam) {
+  const { ctx } = view;
+  const segs = 60;
+  ctx.beginPath(); let pen = false;
+  for (let i = 0; i <= segs; i++) {
+    const phi = -Math.PI/2 + (i/segs)*Math.PI;
+    const t = globeXform(latLon(phi, lam, EARTH_R*1.001), view);
+    if (t.z < 0) { pen = false; continue; }
+    const p = toScreen(t, view);
+    if (!pen) { ctx.moveTo(p.sx, p.sy); pen = true; } else ctx.lineTo(p.sx, p.sy);
+  }
+  ctx.stroke();
+}
+
+function drawTrail(view, pts, color, alpha) {
+  const { ctx } = view;
+  if (pts.length < 2) return;
+  ctx.save(); ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+  // back pass (faded)
+  ctx.beginPath(); let pen = false;
+  for (const pt of pts) {
+    const t = trajXform(pt); if (t.z >= 0) { pen = false; continue; }
+    const p = toScreen(t, view);
+    if (!pen) { ctx.moveTo(p.sx,p.sy); pen=true; } else ctx.lineTo(p.sx,p.sy);
+  }
+  ctx.globalAlpha = alpha * 0.22; ctx.strokeStyle = color; ctx.stroke();
+  // front pass
+  ctx.beginPath(); pen = false;
+  for (const pt of pts) {
+    const t = trajXform(pt); if (t.z < 0) { pen = false; continue; }
+    const p = toScreen(t, view);
+    if (!pen) { ctx.moveTo(p.sx,p.sy); pen=true; } else ctx.lineTo(p.sx,p.sy);
+  }
+  ctx.globalAlpha = alpha; ctx.strokeStyle = color; ctx.stroke();
   ctx.restore();
-
-  drawGraticule(view);
-  drawAxis(view);
-  drawEquator(view);
 }
 
-// Draw latitude/longitude grid. Only front-facing (z > 0 after transform)
-// segments are drawn.
-function drawGraticule(view) {
-  const { ctx } = view;
-  ctx.strokeStyle = COLORS.grid;
-  ctx.lineWidth = 1;
-
-  // Latitude circles
-  for (let lat = -60; lat <= 60; lat += 30) {
-    const phi = (lat * Math.PI) / 180;
-    drawLatitudeCircle(view, phi);
-  }
-
-  // Longitude meridians
-  for (let lonDeg = 0; lonDeg < 360; lonDeg += 30) {
-    const lambda = (lonDeg * Math.PI) / 180;
-    drawMeridian(view, lambda);
-  }
-}
-
-function drawLatitudeCircle(view, phi) {
-  const { ctx } = view;
-  const segs = 96;
-  ctx.beginPath();
-  let moved = false;
-  for (let i = 0; i <= segs; i++) {
-    const lambda = (i / segs) * Math.PI * 2;
-    const v = latLonToVec3(phi, lambda, EARTH_R * 1.001);
-    const t = viewTransform(v, view);
-    if (t.z >= -0.05) {
-      const p = project(t, view);
-      if (!moved) { ctx.moveTo(p.sx, p.sy); moved = true; }
-      else ctx.lineTo(p.sx, p.sy);
-    } else {
-      moved = false;
-    }
-  }
-  ctx.stroke();
-}
-
-function drawMeridian(view, lambda) {
-  const { ctx } = view;
-  const segs = 64;
-  ctx.beginPath();
-  let moved = false;
-  for (let i = 0; i <= segs; i++) {
-    const phi = -Math.PI / 2 + (i / segs) * Math.PI;
-    const v = latLonToVec3(phi, lambda, EARTH_R * 1.001);
-    const t = viewTransform(v, view);
-    if (t.z >= -0.05) {
-      const p = project(t, view);
-      if (!moved) { ctx.moveTo(p.sx, p.sy); moved = true; }
-      else ctx.lineTo(p.sx, p.sy);
-    } else {
-      moved = false;
-    }
-  }
-  ctx.stroke();
-}
-
-function drawEquator(view) {
-  const { ctx } = view;
-  ctx.strokeStyle = COLORS.equator;
-  ctx.globalAlpha = 0.8;
-  ctx.lineWidth = 1.5;
-  drawLatitudeCircle(view, 0);
-  ctx.globalAlpha = 1;
-}
-
-function drawAxis(view) {
-  const { ctx } = view;
-  const top = viewTransform({ x: 0, y: EARTH_R * 1.25, z: 0 }, view);
-  const bot = viewTransform({ x: 0, y: -EARTH_R * 1.25, z: 0 }, view);
-  const a = project(top, view);
-  const b = project(bot, view);
-  ctx.strokeStyle = COLORS.axis;
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.moveTo(a.sx, a.sy);
-  ctx.lineTo(b.sx, b.sy);
-  ctx.stroke();
-}
-
-function drawTrail(view, points, color) {
-  const { ctx } = view;
-  if (points.length < 2) return;
-
-  // Draw in two passes so the hidden side is faded, the visible side is bright.
-  ctx.lineWidth = 2.5;
-  ctx.lineCap = 'round';
-
-  for (const front of [false, true]) {
-    ctx.beginPath();
-    let moved = false;
-    for (let i = 0; i < points.length; i++) {
-      const t = viewTransform(points[i], view);
-      const isFront = t.z >= -0.02;
-      if (isFront !== front) { moved = false; continue; }
-      const p = project(t, view);
-      if (!moved) { ctx.moveTo(p.sx, p.sy); moved = true; }
-      else ctx.lineTo(p.sx, p.sy);
-    }
-    ctx.globalAlpha = front ? 1 : 0.25;
-    ctx.strokeStyle = color;
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawMarker(view, p3, color, label) {
-  const t = viewTransform(p3, view);
-  const isFront = t.z >= -0.02;
-  const p = project(t, view);
+function drawDot(view, pt3, color, r, label) {
+  const t = trajXform(pt3);
+  const p = toScreen(t, view);
   const { ctx } = view;
   ctx.save();
-  ctx.globalAlpha = isFront ? 1 : 0.3;
+  ctx.globalAlpha = t.z < 0 ? 0.25 : 1;
   ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(p.sx, p.sy, 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  if (label) {
+  ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI*2); ctx.fill();
+  if (label && t.z >= 0) {
     ctx.fillStyle = '#e8ecff';
-    ctx.font = '11px "Pretendard", "Noto Sans KR", system-ui, sans-serif';
-    ctx.fillText(label, p.sx + 8, p.sy - 6);
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.fillText(label, p.sx+r+3, p.sy-3);
   }
   ctx.restore();
 }
 
-function drawBall(view, p3) {
-  const t = viewTransform(p3, view);
-  const p = project(t, view);
-  const { ctx } = view;
-  const isFront = t.z >= -0.02;
-  ctx.save();
-  ctx.globalAlpha = isFront ? 1 : 0.5;
-  ctx.fillStyle = COLORS.ball;
-  ctx.beginPath();
-  ctx.arc(p.sx, p.sy, 4.5, 0, Math.PI * 2);
-  ctx.fill();
-  // Subtle halo
-  ctx.globalAlpha = (isFront ? 0.4 : 0.2);
-  ctx.beginPath();
-  ctx.arc(p.sx, p.sy, 8, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)';
-  ctx.fill();
-  ctx.restore();
-}
+function render(view, fullPts, shownPts, color, startPt, endPt, ballPt) {
+  const { ctx, w, h, cx, cy, scale } = view;
+  ctx.clearRect(0, 0, w, h);
+  drawBg(view);
 
-function renderView(view, fullPath, partialPath, color, startPt, endPt) {
-  const { ctx, width, height } = view;
-  ctx.clearRect(0, 0, width, height);
-  drawBackground(view);
+  // Center the view on the current ball position so the ball stays mid-screen.
+  const bt = trajXform(ballPt || shownPts[shownPts.length-1] || fullPts[0]);
+  const bsx = cx + bt.x * scale;
+  const bsy = cy - bt.y * scale;
+  const dx = cx - bsx, dy = cy - bsy;
+
+  ctx.save();
+  ctx.translate(dx, dy);
+
   drawGlobe(view);
+  drawTrail(view, fullPts,  color, 0.3);   // ghost full path
+  drawTrail(view, shownPts, color, 1.0);   // traveled path bright
+  drawDot(view, startPt, COLORS.start, 5.5, '시작');
+  drawDot(view, endPt,   COLORS.end,   5.5, '끝');
+  if (shownPts.length > 0) drawDot(view, ballPt, '#fff', 5);
 
-  // Full planned path as a faded reference so the whole route is visible.
-  ctx.save();
-  ctx.globalAlpha = 0.35;
-  drawTrail(view, fullPath, color);
   ctx.restore();
-
-  // Traveled path so far, bright.
-  drawTrail(view, partialPath, color);
-
-  drawMarker(view, startPt, COLORS.startMark, '시작');
-  drawMarker(view, endPt, COLORS.endMark, '끝');
-
-  if (partialPath.length > 0) {
-    drawBall(view, partialPath[partialPath.length - 1]);
-  }
 }
 
-let lastTime = performance.now();
+// ---------- Animation loop --------------------------------------------------
 
-function animate(now) {
-  const dt = Math.min(0.05, (now - lastTime) / 1000);
-  lastTime = now;
+let lastT = performance.now();
+
+function loop(now) {
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
 
   if (state.running) {
     state.elapsed += dt * state.timeScale;
-    if (state.elapsed >= state.duration) {
-      state.elapsed = state.duration;
-      state.running = false;
-    }
+    if (state.elapsed >= state.duration) { state.elapsed = state.duration; state.running = false; }
   }
 
   const frac = Math.min(1, state.elapsed / state.duration);
-  const nE = Math.max(1, Math.floor(frac * (trajectory.earth.length - 1)));
-  const nS = Math.max(1, Math.floor(frac * (trajectory.space.length - 1)));
+  const nE = Math.max(1, Math.round(frac * (traj.earth.length - 1)));
+  const nS = Math.max(1, Math.round(frac * (traj.space.length - 1)));
 
   const omega = OMEGA_BASE * state.rotationMul;
+  const physT = frac * state.physDuration; // actual physics time elapsed
 
-  // Earth-view: ground is fixed (we show in the rotating frame), so no globe spin.
-  views.earth.earthAngle = 0;
-  // Space-view: globe rotates at ω relative to the trajectory (which is plotted in inertial coords).
-  views.space.earthAngle = omega * state.elapsed;
+  views.earth.earthAngle = 0;                   // earth view: globe is stationary
+  views.space.earthAngle = omega * physT;        // space view: globe rotates
 
-  const earthFull = trajectory.earth;
-  const spaceFull = trajectory.space;
+  const ef = traj.earth, sf = traj.space;
+  if (!ef.length || !sf.length) { requestAnimationFrame(loop); return; }
 
-  renderView(
-    views.earth,
-    earthFull,
-    earthFull.slice(0, nE + 1),
-    COLORS.trailEarth,
-    earthFull[0],
-    earthFull[earthFull.length - 1]
-  );
-  renderView(
-    views.space,
-    spaceFull,
-    spaceFull.slice(0, nS + 1),
-    COLORS.trailSpace,
-    spaceFull[0],
-    spaceFull[spaceFull.length - 1]
-  );
+  render(views.earth, ef, ef.slice(0, nE+1), COLORS.trailEarth, ef[0], ef[ef.length-1], ef[nE]);
+  render(views.space, sf, sf.slice(0, nS+1), COLORS.trailSpace, sf[0], sf[sf.length-1], sf[nS]);
 
-  requestAnimationFrame(animate);
+  requestAnimationFrame(loop);
 }
 
-function updateExplanation() {
-  const hemi = state.hemisphere === 'N' ? '북반구' : '남반구';
-  const deflect = state.hemisphere === 'N' ? '오른쪽' : '왼쪽';
+// ---------- Explanations ----------------------------------------------------
+
+function updateExp() {
+  const hs = state.hemisphere === 'N' ? '북반구' : '남반구';
+  const d  = state.hemisphere === 'N' ? '오른쪽' : '왼쪽';
   const map = {
-    'eq-to-pole': `적도에서 ${hemi}의 극을 향해 던진 공은 자전에 의한 동쪽 방향 접선 속도를 함께 가진 채 출발합니다. 고위도로 갈수록 지표가 자전으로 움직이는 속도가 느려지기 때문에, 지구 관측자에게는 공이 원래 목표보다 ${deflect}(동쪽)으로 휘어 보입니다.`,
-    'pole-to-eq': `극 근처에서 적도 방향으로 던진 공은 초기 접선 속도가 거의 0입니다. 공이 저위도로 내려올수록 아래쪽 지면이 더 빠르게 동쪽으로 이동하기 때문에, 지구 관측자에게는 공이 ${deflect}(서쪽)으로 뒤처져 휘어 보입니다.`,
-    'eastward': `${hemi}에서 지구 자전 방향(동쪽)으로 던진 공은 원심 효과가 커지면서 적도 쪽으로 밀립니다. 결과적으로 지구 관측자에게는 공이 ${deflect}으로 휘어 보입니다.`,
-    'westward': `${hemi}에서 자전 반대 방향(서쪽)으로 던진 공은 원심 효과가 줄어 극 쪽으로 휘어집니다. 결과적으로 지구 관측자에게는 공이 ${deflect}으로 휘어 보입니다.`,
+    'eq-to-pole': `적도에서 ${hs}의 극을 향해 던진 공은 자전의 동쪽 접선 속도를 가지고 출발합니다. 고위도로 갈수록 지표 자전 속도가 느려지므로 지구 관측자 눈에는 공이 ${d}(동쪽)으로 휘어 보입니다.`,
+    'pole-to-eq': `극 근처에서 적도로 던진 공은 초기 접선 속도가 거의 없습니다. 저위도로 내려올수록 지면이 더 빠르게 동으로 움직여 공이 ${d}(서쪽)으로 뒤처지는 것처럼 보입니다.`,
+    'eastward':   `${hs}에서 동쪽으로 던진 공은 원심 효과가 커져 적도 쪽(${d})으로 휘어 보입니다.`,
+    'westward':   `${hs}에서 서쪽으로 던진 공은 원심 효과가 줄어 극 쪽(${d})으로 휘어 보입니다.`,
   };
-  ui.explanation.textContent = map[state.scenario] || '';
+  ui.exp.textContent = map[state.scenario] || '';
 }
