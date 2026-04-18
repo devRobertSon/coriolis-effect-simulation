@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>코리올리 효과 시뮬레이션</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="app-header">
+    <h1>코리올리 효과 시뮬레이션</h1>
+    <p class="subtitle">지구 관측자 시점과 우주 관측자 시점을 비교하며 코리올리 힘을 확인해 보세요</p>
+  </header>
+
+  <main class="app-main">
+    <section class="viewers">
+      <div class="viewer">
+        <div class="viewer-label">지구 관측자 시점 (회전 좌표계)</div>
+        <canvas id="earthView"></canvas>
+        <div class="viewer-hint" id="earthViewHint">공이 휘어져 보입니다</div>
+      </div>
+      <div class="viewer">
+        <div class="viewer-label">우주 관측자 시점 (관성 좌표계)</div>
+        <canvas id="spaceView"></canvas>
+        <div class="viewer-hint" id="spaceViewHint">공은 직선으로 움직입니다</div>
+      </div>
+    </section>
+
+    <aside class="controls">
+      <div class="panel">
+        <h2>반구 선택</h2>
+        <div class="btn-group" role="group" aria-label="반구 선택">
+          <button class="btn toggle" data-hemi="N" aria-pressed="true">북반구</button>
+          <button class="btn toggle" data-hemi="S" aria-pressed="false">남반구</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>시나리오</h2>
+        <div class="scenario-list">
+          <button class="btn scenario" data-scenario="eq-to-pole" aria-pressed="true">
+            <span class="scenario-title">① 적도 → 극</span>
+            <span class="scenario-desc">적도에서 극을 향해 공을 던짐</span>
+          </button>
+          <button class="btn scenario" data-scenario="pole-to-eq" aria-pressed="false">
+            <span class="scenario-title">② 극 → 적도</span>
+            <span class="scenario-desc">극에서 적도를 향해 공을 던짐</span>
+          </button>
+          <button class="btn scenario" data-scenario="eastward" aria-pressed="false">
+            <span class="scenario-title">③ 자전 방향 (동쪽)</span>
+            <span class="scenario-desc">지구 자전 방향으로 공을 던짐</span>
+          </button>
+          <button class="btn scenario" data-scenario="westward" aria-pressed="false">
+            <span class="scenario-title">④ 자전 반대 방향 (서쪽)</span>
+            <span class="scenario-desc">지구 자전 반대 방향으로 공을 던짐</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>재생</h2>
+        <div class="btn-group playback">
+          <button class="btn primary" id="playBtn">▶ 재생</button>
+          <button class="btn" id="pauseBtn">⏸ 일시정지</button>
+          <button class="btn" id="stopBtn">⏹ 정지</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>파라미터</h2>
+        <div class="slider-row">
+          <label for="speedSlider">공 속도</label>
+          <input type="range" id="speedSlider" min="0.2" max="2.0" step="0.05" value="1.0" />
+          <span class="slider-value" id="speedValue">1.00</span>
+        </div>
+        <div class="slider-row">
+          <label for="rotationSlider">자전 속도 (배율)</label>
+          <input type="range" id="rotationSlider" min="0" max="3.0" step="0.05" value="1.0" />
+          <span class="slider-value" id="rotationValue">1.00</span>
+        </div>
+        <div class="slider-row">
+          <label for="timeScaleSlider">시간 배율</label>
+          <input type="range" id="timeScaleSlider" min="0.1" max="3.0" step="0.05" value="1.0" />
+          <span class="slider-value" id="timeScaleValue">1.00</span>
+        </div>
+      </div>
+
+      <div class="panel info">
+        <h2>설명</h2>
+        <p id="explanation">
+          코리올리 효과는 회전하는 좌표계(지구) 위에서 움직이는 물체가 직선이 아니라 휘어진 경로로 보이게 만드는
+          겉보기 힘입니다. 우주에서 보면 공은 실제로 직선으로 움직이지만, 지구와 함께 회전하는 관측자에게는
+          북반구에서 오른쪽으로, 남반구에서 왼쪽으로 휘어지는 것처럼 보입니다.
+        </p>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="app-footer">
+    <span>궤도 색상: <span class="legend earth">지구 관측자 시점</span> / <span class="legend space">우주 관측자 시점(직선)</span></span>
+  </footer>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
