@@ -326,8 +326,8 @@ function loop(now) {
   const ef=traj.earth, sf=traj.space;
   if (!ef.length||!sf.length) { requestAnimationFrame(loop); return; }
 
-  views.earth.earthAngle = omega * physT;
-  views.space.earthAngle = omega * physT;
+  views.earth.earthAngle = 0;              // earth observer: globe appears fixed
+  views.space.earthAngle = omega * physT;  // space observer: globe rotates
 
   renderView(views.earth, ef.slice(0,nE+1), ef, COLORS.trailE, ef[nE]);
   renderView(views.space, sf.slice(0,nS+1), sf, COLORS.trailS, sf[nS]);
