@@ -32,19 +32,11 @@ let views = {}, ui = {},
     stars = null;
 
 window.addEventListener('DOMContentLoaded', () => {
-  // Rotating-earth views
-  views.earth      = mkView('earthView');
-  views.space      = mkView('spaceView');
-  // Fixed-earth views
-  views.earthFixed = mkView('earthFixed');
-  views.spaceFixed = mkView('spaceFixed');
+  views.earth = mkView('earthView');
+  views.space = mkView('spaceView');
 
-  // In rotating views the globe spins; earth-frame trajectory rotates with it.
   views.earth.trajWithGlobe = true;
   views.space.trajWithGlobe = false;
-  // In fixed views the globe stays put; trajectory drawn as-is.
-  views.earthFixed.trajWithGlobe = false;
-  views.spaceFixed.trajWithGlobe = false;
 
   bindUI();
   buildTraj();
@@ -181,7 +173,7 @@ function buildTraj() {
   for (const v of allViews()) v.earthAngle = 0;
 }
 
-function allViews() { return [views.earth, views.space, views.earthFixed, views.spaceFixed]; }
+function allViews() { return [views.earth, views.space]; }
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
 
@@ -334,19 +326,11 @@ function loop(now) {
   const ef=traj.earth, sf=traj.space;
   if (!ef.length||!sf.length) { requestAnimationFrame(loop); return; }
 
-  // Rotating views: globe spins
-  views.earth.earthAngle      = omega * physT;
-  views.space.earthAngle      = omega * physT;
-  // Fixed views: globe stays put
-  views.earthFixed.earthAngle = 0;
-  views.spaceFixed.earthAngle = 0;
+  views.earth.earthAngle = omega * physT;
+  views.space.earthAngle = omega * physT;
 
-  // Earth-frame trajectory: traj.earth (lat/lon lines, Coriolis-free path on globe)
-  // Space-frame trajectory: traj.space (inertial = earth-frame lon + earth rotation)
-  renderView(views.earth,      ef.slice(0,nE+1), ef, COLORS.trailE, ef[nE]);
-  renderView(views.space,      sf.slice(0,nS+1), sf, COLORS.trailS, sf[nS]);
-  renderView(views.earthFixed, ef.slice(0,nE+1), ef, COLORS.trailE, ef[nE]);
-  renderView(views.spaceFixed, sf.slice(0,nS+1), sf, COLORS.trailS, sf[nS]);
+  renderView(views.earth, ef.slice(0,nE+1), ef, COLORS.trailE, ef[nE]);
+  renderView(views.space, sf.slice(0,nS+1), sf, COLORS.trailS, sf[nS]);
 
   requestAnimationFrame(loop);
 }
@@ -357,10 +341,10 @@ function updateExp() {
   const hs = state.hemisphere==='N' ? '북반구' : '남반구';
   const d  = state.hemisphere==='N' ? '오른쪽' : '왼쪽';
   const map = {
-    'eq-to-pole': `${hs}: 적도에서 극으로 경도선을 따라 이동합니다. 지구 고정 시점(아래 왼쪽)에서는 경도선을 직선으로 따라가지만, 우주 고정 시점(아래 오른쪽)에서는 지구 자전이 더해져 나선형으로 보입니다.`,
-    'pole-to-eq': `${hs}: 극에서 적도 방향으로 경도선을 따라 이동합니다. 지구 고정(아래 왼쪽) = 직선, 우주 고정(아래 오른쪽) = 나선.`,
-    'eastward':   `${hs}: 위도선을 따라 동쪽으로 이동합니다. 지구 고정(아래 왼쪽) = 위도선 원, 우주 고정(아래 오른쪽) = 지구 자전 속도가 더해진 더 빠른 원.`,
-    'westward':   `${hs}: 위도선을 따라 서쪽으로 이동합니다. 지구 고정(아래 왼쪽) = 위도선 원, 우주 고정(아래 오른쪽) = 지구 자전 속도가 일부 상쇄된 원.`,
+    'eq-to-pole': `${hs}: 적도에서 극을 향해 공을 던지면 우주에서는 직선이지만, 지구 관측자에게는 ${d}으로 휘어져 보입니다.`,
+    'pole-to-eq': `${hs}: 극에서 적도를 향해 공을 던지면 우주에서는 직선이지만, 지구 관측자에게는 ${d}으로 휘어져 보입니다.`,
+    'eastward':   `${hs}: 자전 방향(동쪽)으로 공을 던지면 우주에서는 직선이지만, 지구 관측자에게는 ${d}으로 휘어져 보입니다.`,
+    'westward':   `${hs}: 자전 반대 방향(서쪽)으로 공을 던지면 우주에서는 직선이지만, 지구 관측자에게는 ${d}으로 휘어져 보입니다.`,
   };
   ui.exp.textContent = map[state.scenario] || '';
 }
