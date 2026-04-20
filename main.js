@@ -161,17 +161,19 @@ function buildTraj() {
       break;
   }
 
-  // Add earth surface velocity (Ω×p0) so the ball starts moving straight
-  // in the earth frame; Coriolis deflection then builds up visibly over time.
-  const v0 = v3(omega * p0.z + vThrow.x, vThrow.y, -omega * p0.x + vThrow.z);
+  // Space view: pure throw velocity only → vertical/horizontal straight line.
+  // Earth view: throw velocity + earth surface velocity (Ω×p0), rotated back into
+  // the rotating frame → ball starts straight then curves due to Coriolis.
+  const v0_earth = v3(omega * p0.z + vThrow.x, vThrow.y, -omega * p0.x + vThrow.z);
 
   state.physDur = ANIM_DUR;
   const STEPS = 300;
   for (let i = 0; i <= STEPS; i++) {
     const t  = (i / STEPS) * state.physDur;
-    const ps = v3(p0.x + v0.x*t, p0.y + v0.y*t, p0.z + v0.z*t); // inertial straight line
-    traj.space.push(ps);
-    traj.earth.push(rotY(ps, -omega * t)); // earth frame = rotate inertial pos backward
+    const ps_space = v3(p0.x + vThrow.x  *t, p0.y + vThrow.y  *t, p0.z + vThrow.z  *t);
+    const ps_earth = v3(p0.x + v0_earth.x*t, p0.y + v0_earth.y*t, p0.z + v0_earth.z*t);
+    traj.space.push(ps_space);
+    traj.earth.push(rotY(ps_earth, -omega * t));
   }
 
   for (const v of allViews()) v.earthAngle = 0;
