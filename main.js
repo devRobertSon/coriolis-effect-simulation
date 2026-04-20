@@ -141,25 +141,29 @@ function buildTraj() {
   const spd   = 0.09 * state.speedMul;
   const LAM   = Math.PI / 2;
 
-  let p0, v0;
+  let p0, vThrow;
   switch (state.scenario) {
     case 'eq-to-pole':
       p0 = latLon(0, LAM);
-      v0 = v3(0, hs * spd, 0);           // straight up/down on screen
+      vThrow = v3(0, hs * spd, 0);
       break;
     case 'pole-to-eq':
       p0 = latLon(hs * (Math.PI/2 - 0.2), LAM);
-      v0 = v3(0, -hs * spd, 0);
+      vThrow = v3(0, -hs * spd, 0);
       break;
     case 'eastward':
       p0 = latLon(hs * Math.PI/6, LAM);
-      v0 = v3(-spd * Math.cos(hs * Math.PI/6), 0, 0); // straight left on screen
+      vThrow = v3(-spd * Math.cos(hs * Math.PI/6), 0, 0);
       break;
     case 'westward':
       p0 = latLon(hs * Math.PI/6, LAM);
-      v0 = v3( spd * Math.cos(hs * Math.PI/6), 0, 0); // straight right on screen
+      vThrow = v3( spd * Math.cos(hs * Math.PI/6), 0, 0);
       break;
   }
+
+  // Add earth surface velocity (Ω×p0) so the ball starts moving straight
+  // in the earth frame; Coriolis deflection then builds up visibly over time.
+  const v0 = v3(omega * p0.z + vThrow.x, vThrow.y, -omega * p0.x + vThrow.z);
 
   state.physDur = ANIM_DUR;
   const STEPS = 300;
