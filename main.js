@@ -161,14 +161,16 @@ function buildTraj() {
       break;
   }
 
-  // Consistent physics: ball has inertial velocity = vThrow (no surface velocity),
-  // so it is a straight vertical/horizontal line in the space view. The earth view
-  // shows the same ball rotated into the rotating frame.
+  // Option B: ball carries the earth surface velocity (Ω×p0) at the throw point.
+  // Space view: straight 3-D line (diagonal — includes earth's tangential speed).
+  // Earth view: same line in the rotating frame → starts straight then curves (Coriolis).
+  const v0 = v3(omega * p0.z + vThrow.x, vThrow.y, -omega * p0.x + vThrow.z);
+
   state.physDur = ANIM_DUR;
   const STEPS = 300;
   for (let i = 0; i <= STEPS; i++) {
     const t  = (i / STEPS) * state.physDur;
-    const ps = v3(p0.x + vThrow.x*t, p0.y + vThrow.y*t, p0.z + vThrow.z*t);
+    const ps = v3(p0.x + v0.x*t, p0.y + v0.y*t, p0.z + v0.z*t);
     traj.space.push(ps);
     traj.earth.push(rotY(ps, -omega * t));
   }
