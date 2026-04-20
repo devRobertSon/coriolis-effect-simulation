@@ -161,19 +161,16 @@ function buildTraj() {
       break;
   }
 
-  // Space view: pure throw velocity only → vertical/horizontal straight line.
-  // Earth view: throw velocity + earth surface velocity (Ω×p0), rotated back into
-  // the rotating frame → ball starts straight then curves due to Coriolis.
-  const v0_earth = v3(omega * p0.z + vThrow.x, vThrow.y, -omega * p0.x + vThrow.z);
-
+  // Consistent physics: ball has inertial velocity = vThrow (no surface velocity),
+  // so it is a straight vertical/horizontal line in the space view. The earth view
+  // shows the same ball rotated into the rotating frame.
   state.physDur = ANIM_DUR;
   const STEPS = 300;
   for (let i = 0; i <= STEPS; i++) {
     const t  = (i / STEPS) * state.physDur;
-    const ps_space = v3(p0.x + vThrow.x  *t, p0.y + vThrow.y  *t, p0.z + vThrow.z  *t);
-    const ps_earth = v3(p0.x + v0_earth.x*t, p0.y + v0_earth.y*t, p0.z + v0_earth.z*t);
-    traj.space.push(ps_space);
-    traj.earth.push(rotY(ps_earth, -omega * t));
+    const ps = v3(p0.x + vThrow.x*t, p0.y + vThrow.y*t, p0.z + vThrow.z*t);
+    traj.space.push(ps);
+    traj.earth.push(rotY(ps, -omega * t));
   }
 
   for (const v of allViews()) v.earthAngle = 0;
