@@ -4,7 +4,7 @@
 //          fixed-earth   × {earth-frame, inertial-frame}
 
 const EARTH_R  = 1.0;
-const OMEGA_B  = 0.165; // exaggerated rotation speed (slider 1.0 ≈ old 0.3x)
+const OMEGA_B  = 0.1485; // rotation speed (slider 1.0 ≈ old 0.9x)
 const ANIM_DUR = 6.0;
 
 const state = {
@@ -138,7 +138,7 @@ function buildTraj() {
 
   const hs    = state.hemisphere === 'N' ? 1 : -1;
   const omega = OMEGA_B * state.rotMul;
-  const spd   = 0.09 * state.speedMul;
+  const spd   = 0.135 * state.speedMul; // ball speed (slider 1.0 ≈ old 1.5x)
   const LAM   = Math.PI / 2;
 
   let p0, vThrow;
