@@ -162,15 +162,19 @@ function buildTraj() {
   }
 
   // Option B: ball carries the earth surface velocity (Ω×p0) at the throw point.
-  // Space view: straight 3-D line (diagonal — includes earth's tangential speed).
-  // Earth view: same line in the rotating frame → starts straight then curves (Coriolis).
+  // Ball is projected onto a sphere of radius R_BALL so it stays at constant
+  // height above the earth surface.
   const v0 = v3(omega * p0.z + vThrow.x, vThrow.y, -omega * p0.x + vThrow.z);
+  const R_BALL = 1.01;
 
   state.physDur = ANIM_DUR;
   const STEPS = 300;
   for (let i = 0; i <= STEPS; i++) {
-    const t  = (i / STEPS) * state.physDur;
-    const ps = v3(p0.x + v0.x*t, p0.y + v0.y*t, p0.z + v0.z*t);
+    const t   = (i / STEPS) * state.physDur;
+    const raw = v3(p0.x + v0.x*t, p0.y + v0.y*t, p0.z + v0.z*t);
+    const len = Math.sqrt(raw.x*raw.x + raw.y*raw.y + raw.z*raw.z);
+    const s   = R_BALL / len;
+    const ps  = v3(raw.x*s, raw.y*s, raw.z*s);
     traj.space.push(ps);
     traj.earth.push(rotY(ps, -omega * t));
   }
