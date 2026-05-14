@@ -153,11 +153,11 @@ function buildTraj() {
       break;
     case 'eastward':
       p0 = latLon(hs * Math.PI/6, LAM);
-      vThrow = v3( spd * Math.cos(hs * Math.PI/6), 0, 0); // +x = east (with rotation)
+      vThrow = v3( 2 * spd * Math.cos(hs * Math.PI/6), 0, 0); // east, faster than rotation
       break;
     case 'westward':
       p0 = latLon(hs * Math.PI/6, LAM);
-      vThrow = v3(-spd * Math.cos(hs * Math.PI/6), 0, 0); // -x = west (against rotation)
+      vThrow = v3(-2 * spd * Math.cos(hs * Math.PI/6), 0, 0); // west, against rotation
       break;
   }
 
